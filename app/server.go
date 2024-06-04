@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -13,12 +15,79 @@ const (
 	PORT = 4221
 )
 
+type Headers map[string]string
+
 type Request struct {
 	Method  string
 	Version string
 	Path    string
-	Headers map[string]string
+	Headers Headers
 	Body    string
+}
+
+type Response struct {
+	Version    string
+	StatusCode int
+	Headers    Headers
+	Body       string
+}
+
+func NewRequest() *Request {
+	return &Request{
+		Headers: make(Headers),
+	}
+}
+
+func NewResponse() *Response {
+	return &Response{
+		Headers: make(Headers),
+	}
+}
+
+func (r *Request) Parse(conn net.Conn) (*Request, error) {
+	scanner := bufio.NewScanner(conn)
+	scanner.Split(splitCRLF)
+
+	// Read request line
+	if scanner.Scan() {
+		requestLine := scanner.Text()
+		parts := strings.Split(requestLine, " ")
+		r.Method, r.Path, r.Version = parts[0], parts[1], parts[2]
+	}
+
+	// Read headers
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			break
+		}
+		parts := strings.Split(line, ":")
+		key, value := parts[0], strings.Join(parts[1:], "")
+		r.Headers[key] = strings.Trim(value, " ")
+	}
+
+	return r, nil
+}
+
+func (r *Response) Send(conn net.Conn) error {
+	_, err := fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\n", r.StatusCode, http.StatusText(r.StatusCode))
+	if err != nil {
+		return err
+	}
+
+	for key, value := range r.Headers {
+		_, err = fmt.Fprintf(conn, "%s: %s\r\n", key, value)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = fmt.Fprintf(conn, "\r\n%s", r.Body)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // splitCRLF is a split function for a Scanner that splits on '\r\n'.
@@ -42,39 +111,6 @@ func splitCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	return 0, nil, nil
 }
 
-func parseRequest(conn net.Conn) *Request {
-	var method, path, version string
-
-	scanner := bufio.NewScanner(conn)
-	scanner.Split(splitCRLF)
-
-	// Read request line
-	if scanner.Scan() {
-		requestLine := scanner.Text()
-		parts := strings.Split(requestLine, " ")
-		method, path, version = parts[0], parts[1], parts[2]
-	}
-
-	// Read headers
-	headers := make(map[string]string)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			break
-		}
-		parts := strings.Split(line, ":")
-		key, value := parts[0], strings.Join(parts[1:], "")
-		headers[key] = strings.Trim(value, " ")
-	}
-
-	return &Request{
-		Method:  method,
-		Version: version,
-		Path:    path,
-		Headers: headers,
-	}
-}
-
 func main() {
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", PORT))
 	if err != nil {
@@ -88,12 +124,32 @@ func main() {
 	}
 	defer conn.Close()
 
-	request := parseRequest(conn)
+	request, err := NewRequest().Parse(conn)
+	if err != nil {
+		log.Fatalf("Error parsing request: %s", err)
+	}
 	fmt.Printf("Request: %+v\n", request)
 
-	if request.Path == "/" {
-		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
-	} else {
-		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+	echoPath := regexp.MustCompile(`^/echo/(.*)$`)
+
+	switch {
+	case request.Path == "/":
+		response := NewResponse()
+		response.StatusCode = http.StatusOK
+		response.Headers["Content-Type"] = "text/plain"
+		response.Body = "Hello, World!"
+		response.Send(conn)
+	case echoPath.MatchString(request.Path):
+		match := echoPath.FindStringSubmatch(request.Path)[1]
+		response := NewResponse()
+		response.StatusCode = http.StatusOK
+		response.Headers["Content-Type"] = "text/plain"
+		response.Headers["Content-Length"] = fmt.Sprintf("%d", len(match))
+		response.Body = match
+		response.Send(conn)
+	default:
+		response := NewResponse()
+		response.StatusCode = http.StatusNotFound
+		response.Send(conn)
 	}
 }
