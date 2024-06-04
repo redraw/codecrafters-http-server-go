@@ -38,12 +38,6 @@ func NewRequest() *Request {
 	}
 }
 
-func NewResponse() *Response {
-	return &Response{
-		Headers: make(Headers),
-	}
-}
-
 func (r *Request) Parse(conn net.Conn) (*Request, error) {
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(splitCRLF)
@@ -69,12 +63,21 @@ func (r *Request) Parse(conn net.Conn) (*Request, error) {
 	return r, nil
 }
 
+func NewResponse() *Response {
+	return &Response{
+		Headers: make(Headers),
+	}
+}
+
 func (r *Response) Send(conn net.Conn) error {
+	// Write response line
 	_, err := fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\n", r.StatusCode, http.StatusText(r.StatusCode))
 	if err != nil {
 		return err
 	}
 
+	// Write headers
+	r.Headers["Content-Length"] = fmt.Sprintf("%d", len(r.Body))
 	for key, value := range r.Headers {
 		_, err = fmt.Fprintf(conn, "%s: %s\r\n", key, value)
 		if err != nil {
@@ -82,6 +85,7 @@ func (r *Response) Send(conn net.Conn) error {
 		}
 	}
 
+	// Write body
 	_, err = fmt.Fprintf(conn, "\r\n%s", r.Body)
 	if err != nil {
 		return err
@@ -131,6 +135,7 @@ func main() {
 	fmt.Printf("Request: %+v\n", request)
 
 	echoPath := regexp.MustCompile(`^/echo/(.*)$`)
+	userAgentPath := regexp.MustCompile(`^/user-agent$`)
 
 	switch {
 	case request.Path == "/":
@@ -144,8 +149,13 @@ func main() {
 		response := NewResponse()
 		response.StatusCode = http.StatusOK
 		response.Headers["Content-Type"] = "text/plain"
-		response.Headers["Content-Length"] = fmt.Sprintf("%d", len(match))
 		response.Body = match
+		response.Send(conn)
+	case userAgentPath.MatchString(request.Path):
+		response := NewResponse()
+		response.StatusCode = http.StatusOK
+		response.Headers["Content-Type"] = "text/plain"
+		response.Body = request.Headers["User-Agent"]
 		response.Send(conn)
 	default:
 		response := NewResponse()
