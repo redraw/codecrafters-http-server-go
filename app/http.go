@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -23,7 +24,7 @@ type Response struct {
 	Version    string
 	StatusCode int
 	Headers    Headers
-	Body       string
+	Body       io.Reader
 }
 
 func NewRequest(conn net.Conn) *Request {
@@ -31,6 +32,10 @@ func NewRequest(conn net.Conn) *Request {
 		Headers: make(Headers),
 		conn:    conn,
 	}
+}
+
+func (r *Request) Close() {
+	r.conn.Close()
 }
 
 func (r *Request) Parse() (*Request, error) {
@@ -66,7 +71,6 @@ func (r *Request) Send(response *Response) error {
 	}
 
 	// Write headers
-	response.Headers["Content-Length"] = fmt.Sprintf("%d", len(response.Body))
 	for key, value := range response.Headers {
 		_, err = fmt.Fprintf(r.conn, "%s: %s\r\n", key, value)
 		if err != nil {
@@ -74,8 +78,10 @@ func (r *Request) Send(response *Response) error {
 		}
 	}
 
+	fmt.Fprintf(r.conn, "\r\n")
+
 	// Write body
-	_, err = fmt.Fprintf(r.conn, "\r\n%s", response.Body)
+	_, err = io.Copy(r.conn, response.Body)
 	if err != nil {
 		return err
 	}
@@ -86,5 +92,6 @@ func (r *Request) Send(response *Response) error {
 func NewResponse() *Response {
 	return &Response{
 		Headers: make(Headers),
+		Body:    strings.NewReader(""),
 	}
 }

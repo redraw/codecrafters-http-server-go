@@ -1,11 +1,15 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 const (
@@ -13,6 +17,9 @@ const (
 )
 
 func main() {
+	directory := flag.String("directory", ".", "Directory to serve")
+	flag.Parse()
+
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", PORT))
 	if err != nil {
 		log.Fatalf("Failed to bind to port %d", PORT)
@@ -31,15 +38,16 @@ func main() {
 		}
 		fmt.Printf("Request: %+v\n", request)
 
-		go handle(request)
+		go handle(request, *directory)
 	}
 }
 
-func handle(request *Request) {
-	defer request.conn.Close()
+func handle(request *Request, directory string) {
+	defer request.Close()
 
 	echoPath := regexp.MustCompile(`^/echo/(.*)$`)
 	userAgentPath := regexp.MustCompile(`^/user-agent$`)
+	filesPath := regexp.MustCompile(`^/files/(.*)$`)
 
 	switch {
 	case request.Path == "/":
@@ -51,13 +59,38 @@ func handle(request *Request) {
 		response := NewResponse()
 		response.StatusCode = http.StatusOK
 		response.Headers["Content-Type"] = "text/plain"
-		response.Body = match
+		response.Headers["Content-Length"] = fmt.Sprintf("%d", len(match))
+		response.Body = strings.NewReader(match)
 		request.Send(response)
 	case userAgentPath.MatchString(request.Path):
+		userAgent := request.Headers["User-Agent"]
 		response := NewResponse()
 		response.StatusCode = http.StatusOK
 		response.Headers["Content-Type"] = "text/plain"
-		response.Body = request.Headers["User-Agent"]
+		response.Headers["Content-Length"] = fmt.Sprintf("%d", len(userAgent))
+		response.Body = strings.NewReader(userAgent)
+		request.Send(response)
+	case filesPath.MatchString(request.Path):
+		match := filesPath.FindStringSubmatch(request.Path)[1]
+		filepath := filepath.Join(directory, match)
+		response := NewResponse()
+		if _, err := os.Stat(filepath); err != nil {
+			response.StatusCode = http.StatusNotFound
+			request.Send(response)
+			return
+		}
+		file, err := os.Open(filepath)
+		if err != nil {
+			response.StatusCode = http.StatusInternalServerError
+			request.Send(response)
+			return
+		}
+		if stat, _ := file.Stat(); !stat.IsDir() {
+			response.Headers["Content-Length"] = fmt.Sprintf("%d", stat.Size())
+		}
+		response.StatusCode = http.StatusOK
+		response.Headers["Content-Type"] = "application/octet-stream"
+		response.Body = file
 		request.Send(response)
 	default:
 		response := NewResponse()
