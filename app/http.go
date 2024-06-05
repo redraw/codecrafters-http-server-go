@@ -17,6 +17,7 @@ type Request struct {
 	Path    string
 	Headers Headers
 	Body    string
+	Params  []string
 	conn    net.Conn
 }
 
