@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
+	"path/filepath"
 	"regexp"
 )
 
@@ -19,13 +19,22 @@ type Server struct {
 	routes map[string]Handler
 }
 
-var rootDirectory = "."
+var rootDirectory string
 
 func main() {
-	flag.StringVar(&rootDirectory, "directory", ".", "Directory to serve")
+	flag.StringVar(&rootDirectory, "directory", "", "Directory to serve")
 	flag.Parse()
 
+	if rootDirectory == "" {
+		rootDirectory, _ = filepath.Abs(".")
+	}
+
 	server := NewServer()
+	server.Route(`^/echo/(.*)$`, handleEcho)
+	server.Route(`^/user-agent$`, handleUserAgent)
+	server.Route(`^/files/(.*)$`, handleFiles)
+	server.Route(`.*`, handleDefault)
+
 	if err := server.Listen(); err != nil {
 		log.Fatalf("Error starting server: %s", err)
 	}
@@ -44,13 +53,6 @@ func (s *Server) Listen() error {
 	}
 	fmt.Println("Listening on port:", PORT)
 
-	// echoPath := regexp.MustCompile(`^/echo/(.*)$`)
-	// userAgentPath := regexp.MustCompile(`^/user-agent$`)
-	// filesPath := regexp.MustCompile(`^/files/(.*)$`)
-
-	s.AddRoute(`^/echo/(.*)$`, EchoHandler)
-	s.AddRoute(`^/user-agent$`, UserAgentHandler)
-
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -62,11 +64,12 @@ func (s *Server) Listen() error {
 			log.Fatalf("Error parsing request: %s", err)
 		}
 
+		fmt.Printf("Request: %+v\n", request)
 		go s.Handle(request)
 	}
 }
 
-func (s *Server) AddRoute(pattern string, handler Handler) {
+func (s *Server) Route(pattern string, handler Handler) {
 	s.routes[pattern] = handler
 }
 
@@ -77,15 +80,9 @@ func (s *Server) Handle(request *Request) {
 		pattern := regexp.MustCompile(path)
 		if pattern.MatchString(request.Path) {
 			request.Params = pattern.FindStringSubmatch(request.Path)
-			fmt.Printf("Request: %+v\n", request)
 			response := handler(request)
 			request.Send(response)
 			return
 		}
 	}
-
-	// Fallback to 404
-	response := NewResponse()
-	response.StatusCode = http.StatusNotFound
-	request.Send(response)
 }

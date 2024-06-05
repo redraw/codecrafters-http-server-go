@@ -16,7 +16,7 @@ type Request struct {
 	Version string
 	Path    string
 	Headers Headers
-	Body    string
+	Body    io.Reader
 	Params  []string
 	conn    net.Conn
 }
@@ -60,6 +60,9 @@ func (r *Request) Parse() (*Request, error) {
 		key, value := parts[0], strings.Join(parts[1:], "")
 		r.Headers[key] = strings.Trim(value, " ")
 	}
+
+	// Create body reader
+	r.Body = bufio.NewReader(r.conn)
 
 	return r, nil
 }
