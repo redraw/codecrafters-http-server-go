@@ -33,7 +33,7 @@ func main() {
 	server.Route(`^/echo/(.*)$`, handleEcho)
 	server.Route(`^/user-agent$`, handleUserAgent)
 	server.Route(`^/files/(.*)$`, handleFiles)
-	server.Route(`.*`, handleDefault)
+	server.Route(`^/$`, handleFound)
 
 	if err := server.Listen(); err != nil {
 		log.Fatalf("Error starting server: %s", err)
@@ -85,4 +85,7 @@ func (s *Server) Handle(request *Request) {
 			return
 		}
 	}
+
+	response := handleNotFound(request)
+	request.Send(response)
 }

@@ -34,19 +34,14 @@ func handleGetFile(request *Request) *Response {
 	filename := request.Params[1]
 	filepath := filepath.Join(rootDirectory, filename)
 	response := NewResponse()
-	if _, err := os.Stat(filepath); err != nil {
-		response.StatusCode = http.StatusNotFound
-		return response
-	}
 	file, err := os.Open(filepath)
 	if err != nil {
-		response.StatusCode = http.StatusInternalServerError
-		return response
+		return handleNotFound(request)
 	}
-	if stat, _ := file.Stat(); !stat.IsDir() {
+	if stat, err := file.Stat(); err == nil {
 		response.Headers["Content-Length"] = fmt.Sprintf("%d", stat.Size())
 	}
-	response.StatusCode = http.StatusOK
+	response.StatusCode = 200
 	response.Headers["Content-Type"] = "application/octet-stream"
 	response.Body = file
 	return response
@@ -59,7 +54,7 @@ func handlePostFile(request *Request) *Response {
 	filepath := filepath.Join(rootDirectory, filename)
 	file, err := os.Create(filepath)
 	if err != nil {
-		response.StatusCode = http.StatusInternalServerError
+		response.StatusCode = 500
 		return response
 	}
 	defer file.Close()
@@ -67,10 +62,10 @@ func handlePostFile(request *Request) *Response {
 	contentLength, _ := strconv.ParseInt(request.Headers["Content-Length"], 10, 64)
 	_, err = io.CopyN(file, request.Body, contentLength)
 	if err != nil {
-		response.StatusCode = http.StatusInternalServerError
+		response.StatusCode = 500
 		return response
 	}
-	response.StatusCode = http.StatusCreated
+	response.StatusCode = 201
 	return response
 }
 
@@ -78,15 +73,20 @@ func handleFiles(request *Request) *Response {
 	switch request.Method {
 	case "GET":
 		return handleGetFile(request)
-
 	case "POST":
 		return handlePostFile(request)
 	}
-	return handleDefault(request)
+	return handleNotFound(request)
 }
 
-func handleDefault(request *Request) *Response {
+func handleNotFound(_ *Request) *Response {
 	response := NewResponse()
-	response.StatusCode = http.StatusNotFound
+	response.StatusCode = 404
+	return response
+}
+
+func handleFound(_ *Request) *Response {
+	response := NewResponse()
+	response.StatusCode = 200
 	return response
 }
