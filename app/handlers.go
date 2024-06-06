@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -53,27 +54,22 @@ func handleGetFile(request *Request) *Response {
 
 func handlePostFile(request *Request) *Response {
 	filename := request.Params[1]
+	response := NewResponse()
+
 	filepath := filepath.Join(rootDirectory, filename)
 	file, err := os.Create(filepath)
 	if err != nil {
-		response := NewResponse()
 		response.StatusCode = http.StatusInternalServerError
 		return response
 	}
 	defer file.Close()
-	buf := make([]byte, 1024)
-	n, err := request.Body.Read(buf)
-	if err != nil && err != io.EOF {
-		fmt.Println("Error reading request body:", err)
-	}
-	fmt.Println("Read", n, "bytes from request body")
-	_, err = io.Copy(file, request.Body)
+
+	contentLength, _ := strconv.ParseInt(request.Headers["Content-Length"], 10, 64)
+	_, err = io.CopyN(file, request.Body, contentLength)
 	if err != nil {
-		response := NewResponse()
 		response.StatusCode = http.StatusInternalServerError
 		return response
 	}
-	response := NewResponse()
 	response.StatusCode = http.StatusCreated
 	return response
 }

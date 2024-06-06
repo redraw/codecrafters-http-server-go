@@ -40,29 +40,47 @@ func (r *Request) Close() {
 }
 
 func (r *Request) Parse() (*Request, error) {
-	scanner := bufio.NewScanner(r.conn)
-	scanner.Split(splitCRLF)
+	reader := bufio.NewReader(r.conn)
 
-	// Read request line
-	if scanner.Scan() {
-		requestLine := scanner.Text()
-		parts := strings.Split(requestLine, " ")
-		r.Method, r.Path, r.Version = parts[0], parts[1], parts[2]
+	// Parse request line
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, err
 	}
 
-	// Read headers
-	for scanner.Scan() {
-		line := scanner.Text()
+	parts := strings.Fields(line)
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("malformed request line: %s", line)
+	}
+
+	r.Method = parts[0]
+	r.Path = parts[1]
+	r.Version = parts[2]
+
+	// Parse headers
+	for {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+
+		line = strings.TrimSpace(line)
 		if line == "" {
 			break
 		}
-		parts := strings.Split(line, ":")
-		key, value := parts[0], strings.Join(parts[1:], "")
-		r.Headers[key] = strings.Trim(value, " ")
+
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("malformed header: %s", line)
+		}
+
+		key := parts[0]
+		value := strings.TrimSpace(parts[1])
+		r.Headers[key] = value
 	}
 
-	// Create body reader
-	r.Body = bufio.NewReader(r.conn)
+	// Parse body
+	r.Body = reader
 
 	return r, nil
 }
