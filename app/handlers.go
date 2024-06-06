@@ -3,90 +3,81 @@ package main
 import (
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 )
 
-func handleEcho(request *Request) *Response {
+func handleEcho(w ResponseWriter, request *Request) {
 	match := request.Params[1]
-	response := NewResponse()
-	response.StatusCode = http.StatusOK
-	response.Headers["Content-Type"] = "text/plain"
-	response.Headers["Content-Length"] = fmt.Sprintf("%d", len(match))
-	response.Body = strings.NewReader(match)
-	return response
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(match)))
+	w.WriteStatus(200)
+	fmt.Fprint(w, match)
 }
 
-func handleUserAgent(request *Request) *Response {
-	userAgent := request.Headers["User-Agent"]
-	response := NewResponse()
-	response.StatusCode = http.StatusOK
-	response.Headers["Content-Type"] = "text/plain"
-	response.Headers["Content-Length"] = fmt.Sprintf("%d", len(userAgent))
-	response.Body = strings.NewReader(userAgent)
-	return response
+func handleUserAgent(w ResponseWriter, request *Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(request.Headers["User-Agent"])))
+	w.WriteStatus(200)
+	fmt.Fprint(w, request.Headers["User-Agent"])
 }
 
-func handleGetFile(request *Request) *Response {
+func handleGetFile(w ResponseWriter, request *Request) {
 	filename := request.Params[1]
 	filepath := filepath.Join(rootDirectory, filename)
-	response := NewResponse()
 	file, err := os.Open(filepath)
 	if err != nil {
-		return handleNotFound(request)
+		handleNotFound(w, request)
+		return
 	}
-	if stat, err := file.Stat(); err == nil {
-		response.Headers["Content-Length"] = fmt.Sprintf("%d", stat.Size())
-	}
-	response.StatusCode = 200
-	response.Headers["Content-Type"] = "application/octet-stream"
-	response.Body = file
-	return response
+	defer file.Close()
+
+	stat, _ := file.Stat()
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size()))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteStatus(200)
+	io.Copy(w, file)
 }
 
-func handlePostFile(request *Request) *Response {
+func handlePostFile(w ResponseWriter, request *Request) {
 	filename := request.Params[1]
-	response := NewResponse()
-
 	filepath := filepath.Join(rootDirectory, filename)
 	file, err := os.Create(filepath)
 	if err != nil {
-		response.StatusCode = 500
-		return response
+		w.WriteStatus(500)
+		return
 	}
 	defer file.Close()
 
 	contentLength, _ := strconv.ParseInt(request.Headers["Content-Length"], 10, 64)
 	_, err = io.CopyN(file, request.Body, contentLength)
 	if err != nil {
-		response.StatusCode = 500
-		return response
+		w.WriteStatus(500)
+		return
 	}
-	response.StatusCode = 201
-	return response
+	w.WriteStatus(201)
+	w.Header().Set("Location", "/files/"+filename)
+	w.WriteHeader()
 }
 
-func handleFiles(request *Request) *Response {
-	switch request.Method {
+func handleFiles(w ResponseWriter, r *Request) {
+	switch r.Method {
 	case "GET":
-		return handleGetFile(request)
+		handleGetFile(w, r)
 	case "POST":
-		return handlePostFile(request)
+		handlePostFile(w, r)
+	default:
+		handleNotFound(w, r)
 	}
-	return handleNotFound(request)
 }
 
-func handleNotFound(_ *Request) *Response {
-	response := NewResponse()
-	response.StatusCode = 404
-	return response
+func handleNotFound(w ResponseWriter, _ *Request) {
+	w.WriteStatus(404)
+	fmt.Fprint(w, "Not Found")
 }
 
-func handleFound(_ *Request) *Response {
-	response := NewResponse()
-	response.StatusCode = 200
-	return response
+func handleFound(w ResponseWriter, _ *Request) {
+	w.WriteStatus(200)
+	fmt.Fprint(w, "OK")
 }

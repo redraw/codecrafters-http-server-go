@@ -9,29 +9,45 @@ import (
 	"strings"
 )
 
-type Headers map[string]string
+type Header map[string]string
 
 type Request struct {
 	Method  string
 	Version string
 	Path    string
-	Headers Headers
+	Headers Header
 	Body    io.Reader
 	Params  []string
 	conn    net.Conn
 }
 
+type ResponseWriter interface {
+	Header() Header
+	WriteStatus(int)
+	WriteHeader() error
+	Write([]byte) (int, error)
+}
+
 type Response struct {
-	Version    string
-	StatusCode int
-	Headers    Headers
-	Body       io.Reader
+	statusCode int
+	header     Header
+	headerSent bool
+	conn       net.Conn
+	writer     *bufio.Writer
 }
 
 func NewRequest(conn net.Conn) *Request {
 	return &Request{
-		Headers: make(Headers),
+		Headers: make(Header),
 		conn:    conn,
+	}
+}
+
+func NewResponse(conn net.Conn) *Response {
+	return &Response{
+		header: make(Header),
+		conn:   conn,
+		writer: bufio.NewWriter(conn),
 	}
 }
 
@@ -85,15 +101,23 @@ func (r *Request) Parse() (*Request, error) {
 	return r, nil
 }
 
-func (r *Request) Send(response *Response) error {
+func (r *Response) WriteStatus(statusCode int) {
+	r.statusCode = statusCode
+}
+
+func (r *Response) WriteHeader() error {
+	if r.headerSent {
+		return nil
+	}
+
 	// Write response line
-	_, err := fmt.Fprintf(r.conn, "HTTP/1.1 %d %s\r\n", response.StatusCode, http.StatusText(response.StatusCode))
+	_, err := fmt.Fprintf(r.conn, "HTTP/1.1 %d %s\r\n", r.statusCode, http.StatusText(r.statusCode))
 	if err != nil {
 		return err
 	}
 
 	// Write headers
-	for key, value := range response.Headers {
+	for key, value := range r.header {
 		_, err = fmt.Fprintf(r.conn, "%s: %s\r\n", key, value)
 		if err != nil {
 			return err
@@ -102,18 +126,34 @@ func (r *Request) Send(response *Response) error {
 
 	fmt.Fprintf(r.conn, "\r\n")
 
-	// Write body
-	_, err = io.Copy(r.conn, response.Body)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
-func NewResponse() *Response {
-	return &Response{
-		Headers: make(Headers),
-		Body:    strings.NewReader(""),
+func (h Header) Set(key string, value string) {
+	h[key] = value
+}
+
+func (h Header) Get(key string) (string, bool) {
+	value, ok := h[key]
+	return value, ok
+}
+
+func (r *Response) Header() Header {
+	return r.header
+}
+
+func (r *Response) Write(data []byte) (int, error) {
+	if !r.headerSent {
+		if err := r.WriteHeader(); err != nil {
+			return 0, err
+		}
+		r.headerSent = true
 	}
+
+	return r.writer.Write(data)
+}
+
+func (r *Response) Close() {
+	r.conn.Close()
+	r.writer.Flush()
 }

@@ -13,7 +13,7 @@ const (
 	PORT = 4221
 )
 
-type Handler func(*Request) *Response
+type Handler func(ResponseWriter, *Request)
 
 type Server struct {
 	routes map[string]Handler
@@ -74,18 +74,17 @@ func (s *Server) Route(pattern string, handler Handler) {
 }
 
 func (s *Server) Handle(request *Request) {
-	defer request.Close()
+	writer := NewResponse(request.conn)
+	defer writer.Close()
 
 	for path, handler := range s.routes {
 		pattern := regexp.MustCompile(path)
 		if pattern.MatchString(request.Path) {
 			request.Params = pattern.FindStringSubmatch(request.Path)
-			response := handler(request)
-			request.Send(response)
+			handler(writer, request)
 			return
 		}
 	}
 
-	response := handleNotFound(request)
-	request.Send(response)
+	handleNotFound(writer, request)
 }
