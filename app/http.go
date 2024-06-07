@@ -98,6 +98,15 @@ func (r *Request) Parse() (*Request, error) {
 	return r, nil
 }
 
+func (r *Request) AcceptsEncoding(encoding string) bool {
+	for _, item := range strings.Split(r.Header["Accept-Encoding"], ",") {
+		if value := strings.TrimSpace(item); encoding == value {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Response) WriteHeader(statusCode int) error {
 	if r.headerSent {
 		return nil

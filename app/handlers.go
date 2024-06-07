@@ -12,7 +12,7 @@ func handleEcho(w ResponseWriter, request *Request) {
 	match := request.Params[1]
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(match)))
-	if value, ok := request.Header["Accept-Encoding"]; ok && value == "gzip" {
+	if request.AcceptsEncoding("gzip") {
 		w.Header().Set("Content-Encoding", "gzip")
 	}
 	fmt.Fprint(w, match)
