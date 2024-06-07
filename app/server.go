@@ -74,17 +74,17 @@ func (s *Server) Route(pattern string, handler Handler) {
 }
 
 func (s *Server) Handle(request *Request) {
-	writer := NewResponse(request.conn)
-	defer writer.Close()
+	response := NewResponse(request.conn)
+	defer response.Close()
 
 	for path, handler := range s.routes {
 		pattern := regexp.MustCompile(path)
 		if pattern.MatchString(request.Path) {
 			request.Params = pattern.FindStringSubmatch(request.Path)
-			handler(writer, request)
+			handler(response, request)
 			return
 		}
 	}
 
-	handleNotFound(writer, request)
+	handleNotFound(response, request)
 }

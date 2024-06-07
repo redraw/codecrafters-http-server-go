@@ -12,15 +12,16 @@ func handleEcho(w ResponseWriter, request *Request) {
 	match := request.Params[1]
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(match)))
-	w.WriteStatus(200)
+	if value, ok := request.Header["Accept-Encoding"]; ok && value == "gzip" {
+		w.Header().Set("Content-Encoding", "gzip")
+	}
 	fmt.Fprint(w, match)
 }
 
 func handleUserAgent(w ResponseWriter, request *Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(request.Headers["User-Agent"])))
-	w.WriteStatus(200)
-	fmt.Fprint(w, request.Headers["User-Agent"])
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(request.Header["User-Agent"])))
+	fmt.Fprint(w, request.Header["User-Agent"])
 }
 
 func handleGetFile(w ResponseWriter, request *Request) {
@@ -36,8 +37,7 @@ func handleGetFile(w ResponseWriter, request *Request) {
 	stat, _ := file.Stat()
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size()))
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.WriteStatus(200)
-	io.Copy(w, file)
+	io.CopyN(w, file, stat.Size())
 }
 
 func handlePostFile(w ResponseWriter, request *Request) {
@@ -45,20 +45,19 @@ func handlePostFile(w ResponseWriter, request *Request) {
 	filepath := filepath.Join(rootDirectory, filename)
 	file, err := os.Create(filepath)
 	if err != nil {
-		w.WriteStatus(500)
+		w.WriteHeader(500)
 		return
 	}
 	defer file.Close()
 
-	contentLength, _ := strconv.ParseInt(request.Headers["Content-Length"], 10, 64)
+	contentLength, _ := strconv.ParseInt(request.Header["Content-Length"], 10, 64)
 	_, err = io.CopyN(file, request.Body, contentLength)
 	if err != nil {
-		w.WriteStatus(500)
+		w.WriteHeader(500)
 		return
 	}
-	w.WriteStatus(201)
 	w.Header().Set("Location", "/files/"+filename)
-	w.WriteHeader()
+	w.WriteHeader(201)
 }
 
 func handleFiles(w ResponseWriter, r *Request) {
@@ -73,11 +72,11 @@ func handleFiles(w ResponseWriter, r *Request) {
 }
 
 func handleNotFound(w ResponseWriter, _ *Request) {
-	w.WriteStatus(404)
+	w.WriteHeader(404)
 	fmt.Fprint(w, "Not Found")
 }
 
 func handleFound(w ResponseWriter, _ *Request) {
-	w.WriteStatus(200)
+	w.WriteHeader(200)
 	fmt.Fprint(w, "OK")
 }

@@ -15,7 +15,7 @@ type Request struct {
 	Method  string
 	Version string
 	Path    string
-	Headers Header
+	Header  Header
 	Body    io.Reader
 	Params  []string
 	conn    net.Conn
@@ -23,8 +23,7 @@ type Request struct {
 
 type ResponseWriter interface {
 	Header() Header
-	WriteStatus(int)
-	WriteHeader() error
+	WriteHeader(int) error
 	Write([]byte) (int, error)
 }
 
@@ -33,13 +32,12 @@ type Response struct {
 	header     Header
 	headerSent bool
 	conn       net.Conn
-	writer     *bufio.Writer
 }
 
 func NewRequest(conn net.Conn) *Request {
 	return &Request{
-		Headers: make(Header),
-		conn:    conn,
+		Header: make(Header),
+		conn:   conn,
 	}
 }
 
@@ -47,7 +45,6 @@ func NewResponse(conn net.Conn) *Response {
 	return &Response{
 		header: make(Header),
 		conn:   conn,
-		writer: bufio.NewWriter(conn),
 	}
 }
 
@@ -92,7 +89,7 @@ func (r *Request) Parse() (*Request, error) {
 
 		key := parts[0]
 		value := strings.TrimSpace(parts[1])
-		r.Headers[key] = value
+		r.Header[key] = value
 	}
 
 	// Parse body
@@ -101,14 +98,11 @@ func (r *Request) Parse() (*Request, error) {
 	return r, nil
 }
 
-func (r *Response) WriteStatus(statusCode int) {
-	r.statusCode = statusCode
-}
-
-func (r *Response) WriteHeader() error {
+func (r *Response) WriteHeader(statusCode int) error {
 	if r.headerSent {
 		return nil
 	}
+	r.statusCode = statusCode
 
 	// Write response line
 	_, err := fmt.Fprintf(r.conn, "HTTP/1.1 %d %s\r\n", r.statusCode, http.StatusText(r.statusCode))
@@ -129,6 +123,17 @@ func (r *Response) WriteHeader() error {
 	return nil
 }
 
+func (r *Response) Write(data []byte) (int, error) {
+	if !r.headerSent {
+		if err := r.WriteHeader(200); err != nil {
+			return 0, err
+		}
+		r.headerSent = true
+	}
+
+	return r.conn.Write(data)
+}
+
 func (h Header) Set(key string, value string) {
 	h[key] = value
 }
@@ -142,18 +147,6 @@ func (r *Response) Header() Header {
 	return r.header
 }
 
-func (r *Response) Write(data []byte) (int, error) {
-	if !r.headerSent {
-		if err := r.WriteHeader(); err != nil {
-			return 0, err
-		}
-		r.headerSent = true
-	}
-
-	return r.writer.Write(data)
-}
-
 func (r *Response) Close() {
 	r.conn.Close()
-	r.writer.Flush()
 }
