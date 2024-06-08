@@ -1,57 +1,33 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"net"
-	"path/filepath"
 	"regexp"
-)
-
-const (
-	PORT = 4221
 )
 
 type Handler func(ResponseWriter, *Request)
 
-type Server struct {
-	routes map[string]Handler
+type HttpServer struct {
+	routes     map[string]Handler
+	middleware []Middleware
+	rootDir    string
 }
 
-var rootDirectory string
-
-func main() {
-	flag.StringVar(&rootDirectory, "directory", "", "Directory to serve")
-	flag.Parse()
-
-	if rootDirectory == "" {
-		rootDirectory, _ = filepath.Abs(".")
-	}
-
-	server := NewServer()
-	server.Route(`^/echo/(.*)$`, handleEcho)
-	server.Route(`^/user-agent$`, handleUserAgent)
-	server.Route(`^/files/(.*)$`, handleFiles)
-	server.Route(`^/$`, handleFound)
-
-	if err := server.Listen(); err != nil {
-		log.Fatalf("Error starting server: %s", err)
+func NewServer(rootDir string) *HttpServer {
+	return &HttpServer{
+		routes:  make(map[string]Handler),
+		rootDir: rootDir,
 	}
 }
 
-func NewServer() *Server {
-	return &Server{
-		routes: make(map[string]Handler),
-	}
-}
-
-func (s *Server) Listen() error {
-	l, err := net.Listen("tcp", fmt.Sprintf(":%d", PORT))
+func (s *HttpServer) Listen(addr string) error {
+	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
-	fmt.Println("Listening on port:", PORT)
+	fmt.Println("Listening on", addr)
 
 	for {
 		conn, err := l.Accept()
@@ -59,32 +35,46 @@ func (s *Server) Listen() error {
 			log.Fatalf("Error accepting connection: %s", err)
 		}
 
-		request, err := NewRequest(conn).Parse()
-		if err != nil {
-			log.Fatalf("Error parsing request: %s", err)
-		}
-
-		fmt.Printf("Request: %+v\n", request)
-		go s.Handle(request)
+		go s.Handle(conn)
 	}
 }
 
-func (s *Server) Route(pattern string, handler Handler) {
+func (s *HttpServer) Route(pattern string, handler Handler) {
 	s.routes[pattern] = handler
 }
 
-func (s *Server) Handle(request *Request) {
-	response := NewResponse(request.conn)
-	defer response.Close()
+func (s *HttpServer) Use(m Middleware) {
+	s.middleware = append(s.middleware, m)
+}
 
+func (s *HttpServer) Handle(conn net.Conn) {
+	defer conn.Close()
+
+	request := NewRequest(conn)
+	if err := request.Parse(); err != nil {
+		log.Printf("Error parsing request: %s", err)
+		return
+	}
+
+	request.ServerRoot = s.rootDir
+	response := NewResponse(conn)
+	defer response.Send()
+
+	// Loop routes
 	for path, handler := range s.routes {
 		pattern := regexp.MustCompile(path)
 		if pattern.MatchString(request.Path) {
 			request.Params = pattern.FindStringSubmatch(request.Path)
+			// Add middlewares
+			for _, m := range s.middleware {
+				handler = m.Handle(handler)
+			}
+			// Handle!
 			handler(response, request)
 			return
 		}
 	}
 
-	handleNotFound(response, request)
+	// Default 404
+	response.Status(404)
 }
